@@ -1,0 +1,8 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP TLC7528
+D Dual 8-bit DAC
+F http://www.ti.com/lit/ds/symlink/tlc7528.pdf
+$ENDCMP
+#
+#End Doc Library

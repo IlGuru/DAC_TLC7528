@@ -1,0 +1,170 @@
+===Sommario===
+
+Un semplice esperimento con questo DAC comandato tramite un ATMEGA328
+
+===TLC7528===
+
+{|
+|-
+| <immagine id=14742 name='DIP20.png'>DIP20.png</immagine> || 
+Il TLC7528 è un doppio DAC parallelo ad 8 bit di tipo R-2R invertita, CMOS compatibile, con 2 latch interni, facilmente interfacciabile con microprocessori e microcontroller. Tutto quello di cui ha bisogno oltre al bus dati di 8 bit, sono 3 segnali:
+
+
+* '''<math>\overline{CS}</math>''': E' il segnale CHIP SELECT. Quando è nello stato alto, il bus dati è in stato di alta impedenza quindi si possono usare gli stessi pin del micro per fare altre cose, tipo comandare un display LCD.
+* '''<math>\overline{DACA}/DACB</math>''': Permette di selezionare il latch in cui inserire il dato e quindi il canale su cui si vuole operare. 0 per il canale A, 1 per il canale B.
+* '''<math>\overline{WR}</math>''': Scrive il dato presente sul bus dati nel latch selezionato con DACA/DACB.
+|}
+
+<immagine id=14747 name='SchemaABlocchi.png'>SchemaABlocchi.png</immagine>
+
+{|
+|-
+| <immagine id=14745 name='Timing.png'>Testo della cella</immagine> || 
+
+A pagina 2 il datasheet descrive la sequenza di operazioni che è molto semplice:
+* <math>\overline{CS}</math> LOW
+
+* Si imposta <math>\overline{DACA}/DACB</math>
+* Si imposta il dato
+* <math>\overline{WR}</math> LOW
+* <math>\overline{WR}</math> HIGH
+* <math>\overline{CS}</math> HIGH
+|}
+
+Quando <math>\overline{CS}</math> e <math>\overline{WR}</math> tornano alti il dato viene trasferito al latch e viene generato il livello di tensione in uscita.
+
+I tempi minimi per le trasizioni di questi segnali sono dell'ordina di 50-60 nanosecondi, il micro utilizzato che lavora a 16 MHz è molto più lento del DAC quindi si possono tranquillamente omettere i vari delayMicroseconds().
+
+Il [http://www.ti.com/lit/ds/symlink/tlc7528.pdf datasheet] ne descrive varie modalità di funzionamento tra cui moltiplicatore e filtro programmabile, in questo articolo descriverò una prova fatta con la modalità Voltage-Mode Operation descritto a pagina 14, ovvero la semplice conversione da digitale ad analogico.
+In questa modalità operativa, viene collagata la tensione di riferimento ai pin OUT ed RFB ed il valore analogico convertito dalla rete R-2R viene prelevato sul pin REF.
+
+La conversione del dato digitale avviene secondo la formula:
+<math>V_o=V_i \left( \frac{D}{256} \right)</math>
+
+
+Dove:
+* <math>V_o</math> è il valore analogico convertito, presente sul pin REF
+* <math>V_o</math> è la tensione di riferimento applicata al pin OUT
+* <math>D</math> è il valore del dato digitale
+
+
+<immagine id=14750 name='VoltageModeOperation600.png'>VoltageModeOperation600.png</immagine>
+
+
+===Schema elettrico===
+
+Questo è lo schema elettrico che ho utilizzato:
+<immagine id=14751 name='dac_tlc7528_001.sch.png'>dac_tlc7528_001.sch.png</immagine>
+
+===Software===
+
+E questo il listato compilato con Arduino UNO:
+
+<pre>
+
+void dac_cs( bool stato ) {
+  if (stato) {
+    PORTB = PORTB | B00000001;
+  } else {
+    PORTB = PORTB & B11111110;
+  }
+}
+void dac_wr( bool stato ) {
+  if (stato) {
+    PORTB = PORTB | B00000010;
+  } else {
+    PORTB = PORTB & B11111101;
+  }
+}
+
+void dac_ch( bool stato ) {
+  //  0  ->  DACA
+  //  1  ->  DACB
+  if (stato) {
+    PORTB = PORTB | B00000100;
+  } else {
+    PORTB = PORTB & B11111011;
+  }
+}
+
+void setup() {
+
+  //  PORTD    Bus Dati per il DAC
+
+  //  PORTB0   CS DAC
+  //  PORTB1   WR DAC
+  //  PORTB2   DACA, DACB
+
+  //  Configuro i pin:
+  DDRD  = B11111111;  //  Tutti i pin come output
+  PORTD = B00000000;
+
+  DDRB  = DDRB  | B00000111;
+  PORTB = PORTB & B11111011;  //  Lascio HIGH CS e WR perchè sono attivi bassi
+ 
+  //  Inizializzo il DAC
+  dac_cs(0);
+  dac_ch(0);  //  DACA
+  dac_wr(0);
+  dac_wr(1);
+  dac_cs(1);
+
+  dac_cs(0);
+  dac_ch(1);  //  DACB
+  dac_wr(0);
+  dac_wr(1);
+  dac_cs(1);
+}
+
+void loop() {
+  int  v_DACA = 0;
+  int  v_DACB = 0;
+
+  //  Divisori di 255:
+  //    1, 3, 5, 17, 255
+  //      15, 51, 85
+  for(v_DACA = 0; v_DACA <= 255; v_DACA+=51) {
+    dac_cs(0);
+    dac_ch(0);  //  DACA
+    PORTD = v_DACA;
+    dac_wr(0);
+    dac_wr(1);
+    dac_cs(1);    
+    for(v_DACB = 0; v_DACB <= 255; v_DACB+=1) {
+      dac_cs(0);
+      dac_ch(1);  //  DACB
+      PORTD = v_DACB;
+      dac_wr(0);
+      dac_wr(1);
+      dac_cs(1);
+    }
+  }
+
+}
+
+</pre>
+
+Quello che vorrei fare è un generatore di rampe programmabile, per un progettino che ho in mente.
+Ho usato vari valori nel ciclo FOR per l'incremento di v_DACB, in sostanza i vari divisori di 255 (1, 3, 5, 15, 17, 51, 85, 255) per avere anche il valore di tensione più alto corrispondente al dato 255 visibile sull' oscilloscopio.
+
+===Cablaggio===
+
+La breadboard cablata è questa:
+<immagine id=14699 name='IMG_20150828_225348.jpg'>IMG_20150828_225348.jpg</immagine>
+
+* Con incremento di v_DACB di 1:
+<immagine id=14700 name='1.png'>1.png</immagine>
+
+* Con incremento di v_DACB di 3:
+<immagine id=14701 name='3.png'>3.png</immagine>
+
+* Con incremento di v_DACB di 5:
+<immagine id=14702 name='5.png'>5.png</immagine>
+
+* Con incremento di v_DACB di 17:
+<immagine id=14703 name='17.png'>17.png</immagine>
+
+Sicuramente con qualche filtro passa basso in uscita si può ottenere un segnale più pulito, ma mi sembra che siamo sulla strada giusta.
+Poi condizionando i segnali con degli operazionali andrà tutto a posto.
+
+<small>''Versione del documento: 1.4''</small>
